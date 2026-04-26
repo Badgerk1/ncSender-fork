@@ -16,28 +16,78 @@
 -->
 
 <template>
-  <div v-if="show" class="plugin-dialog-backdrop" @click.self="handleBackdropClick">
+  <div v-if="show" class="plugin-dialog-root">
     <div
       ref="dialogContainer"
       class="plugin-dialog-container"
-      :class="{ 'is-dragging': isDragging }"
+      :class="{
+        'is-dragging': isDragging,
+        'is-resizing': isResizing,
+        'is-minimized': isMinimized,
+        'is-maximized': isMaximized
+      }"
       :style="containerStyle"
     >
+      <!-- Corner resize handles (only when resizable) -->
+      <template v-if="!isMinimized && !isMaximized">
+        <div class="resize-handle resize-nw" @mousedown.stop.prevent="startResize('nw', $event)"></div>
+        <div class="resize-handle resize-ne" @mousedown.stop.prevent="startResize('ne', $event)"></div>
+        <div class="resize-handle resize-sw" @mousedown.stop.prevent="startResize('sw', $event)"></div>
+        <div class="resize-handle resize-se" @mousedown.stop.prevent="startResize('se', $event)"></div>
+      </template>
+
       <div class="plugin-dialog">
         <div
           class="plugin-dialog-header"
           @mousedown="startDrag"
-          @dblclick="reCenter"
-          title="Drag to move · Double-click to re-center"
+          @dblclick="toggleMaximize"
+          title="Drag to move · Double-click to maximize"
         >
-          <h3>{{ dialogData.title }}</h3>
-          <button v-if="isClosable" class="close-button" type="button" @mousedown.stop @click="closeDialog" aria-label="Close dialog">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16">
-              <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708"/>
-            </svg>
-          </button>
+          <span class="plugin-dialog-title">{{ dialogData.title }}</span>
+          <div class="window-controls">
+            <button
+              class="window-btn window-btn--minimize"
+              type="button"
+              @mousedown.stop
+              @click="toggleMinimize"
+              :aria-label="isMinimized ? 'Restore' : 'Minimize'"
+            >
+              <svg width="10" height="1" viewBox="0 0 10 1" fill="currentColor">
+                <rect width="10" height="1"/>
+              </svg>
+            </button>
+            <button
+              class="window-btn window-btn--maximize"
+              type="button"
+              @mousedown.stop
+              @click="toggleMaximize"
+              :aria-label="isMaximized ? 'Restore' : 'Maximize'"
+            >
+              <svg v-if="!isMaximized" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1">
+                <rect x="0.5" y="0.5" width="9" height="9"/>
+              </svg>
+              <svg v-else width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1">
+                <rect x="2.5" y="0.5" width="7" height="7"/>
+                <rect x="0.5" y="2.5" width="7" height="7" fill="var(--color-surface)"/>
+              </svg>
+            </button>
+            <button
+              v-if="isClosable"
+              class="window-btn window-btn--close"
+              type="button"
+              @mousedown.stop
+              @click="closeDialog"
+              aria-label="Close"
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.2">
+                <line x1="0" y1="0" x2="10" y2="10"/>
+                <line x1="10" y1="0" x2="0" y2="10"/>
+              </svg>
+            </button>
+          </div>
         </div>
         <div
+          v-show="!isMinimized"
           class="plugin-dialog-content"
           ref="dialogContent"
           v-html="dialogData.content"
@@ -59,6 +109,8 @@ interface PluginDialogData {
   options: Record<string, any>;
 }
 
+const MIN_WIDTH = 320;
+const MIN_HEIGHT = 200;
 const DRAG_MARGIN = 40;
 
 const show = ref(false);
@@ -71,14 +123,30 @@ const dialogData = ref<PluginDialogData>({
 const dialogContent = ref<HTMLDivElement | null>(null);
 const dialogContainer = ref<HTMLDivElement | null>(null);
 
+// Window state
+const isMinimized = ref(false);
+const isMaximized = ref(false);
+
 // Drag / position state
-const posX = ref(-1); // -1 = not yet positioned, rely on CSS flex centering
+const posX = ref(-1); // -1 = not yet positioned (CSS centering)
 const posY = ref(-1);
 const isDragging = ref(false);
 let dragStartMouseX = 0;
 let dragStartMouseY = 0;
 let dragStartPosX = 0;
 let dragStartPosY = 0;
+
+// Resize state
+const isResizing = ref(false);
+const dialogWidth = ref(0);  // 0 = auto
+const dialogHeight = ref(0); // 0 = auto
+let resizeEdge = '';
+let resizeStartMouseX = 0;
+let resizeStartMouseY = 0;
+let resizeStartLeft = 0;
+let resizeStartTop = 0;
+let resizeStartWidth = 0;
+let resizeStartHeight = 0;
 
 let unsubscribe: (() => void) | null = null;
 
@@ -89,14 +157,35 @@ const isClosable = computed(() => {
 const isPositioned = computed(() => posX.value !== -1);
 
 const containerStyle = computed(() => {
-  if (!isPositioned.value) return {};
-  return {
-    position: 'absolute' as const,
-    left: posX.value + 'px',
-    top: posY.value + 'px',
-    transform: 'none',
-    margin: '0'
-  };
+  if (isMaximized.value) {
+    return {
+      position: 'fixed' as const,
+      top: '0',
+      left: '0',
+      width: '100vw',
+      height: '100vh',
+      transform: 'none',
+      borderRadius: '0',
+    };
+  }
+
+  const style: Record<string, string> = {};
+
+  if (isPositioned.value) {
+    style.left = posX.value + 'px';
+    style.top = posY.value + 'px';
+    style.transform = 'none';
+  }
+
+  if (dialogWidth.value > 0) {
+    style.width = dialogWidth.value + 'px';
+  }
+
+  if (!isMinimized.value && dialogHeight.value > 0) {
+    style.height = dialogHeight.value + 'px';
+  }
+
+  return style;
 });
 
 const getClampedPos = (x: number, y: number) => {
@@ -117,16 +206,22 @@ const reCenter = () => {
   posY.value = -1;
 };
 
-const startDrag = (event: MouseEvent) => {
-  const el = dialogContainer.value;
-  if (!el) return;
-
-  // Capture current rendered position before switching to absolute positioning
+const capturePosition = () => {
   if (!isPositioned.value) {
+    const el = dialogContainer.value;
+    if (!el) return;
     const rect = el.getBoundingClientRect();
     posX.value = rect.left;
     posY.value = rect.top;
+    if (dialogWidth.value === 0) dialogWidth.value = rect.width;
+    if (dialogHeight.value === 0) dialogHeight.value = rect.height;
   }
+};
+
+const startDrag = (event: MouseEvent) => {
+  if (isResizing.value || isMaximized.value) return;
+
+  capturePosition();
 
   isDragging.value = true;
   dragStartMouseX = event.clientX;
@@ -137,7 +232,49 @@ const startDrag = (event: MouseEvent) => {
   event.preventDefault();
 };
 
+const startResize = (edge: string, event: MouseEvent) => {
+  if (isMaximized.value || isMinimized.value) return;
+
+  capturePosition();
+
+  isResizing.value = true;
+  resizeEdge = edge;
+  resizeStartMouseX = event.clientX;
+  resizeStartMouseY = event.clientY;
+  resizeStartLeft = posX.value;
+  resizeStartTop = posY.value;
+
+  const el = dialogContainer.value;
+  resizeStartWidth = el ? el.offsetWidth : dialogWidth.value || MIN_WIDTH;
+  resizeStartHeight = el ? el.offsetHeight : dialogHeight.value || MIN_HEIGHT;
+
+  event.preventDefault();
+};
+
 const onMouseMove = (event: MouseEvent) => {
+  if (isResizing.value) {
+    const dx = event.clientX - resizeStartMouseX;
+    const dy = event.clientY - resizeStartMouseY;
+
+    if (resizeEdge.includes('e')) {
+      dialogWidth.value = Math.max(MIN_WIDTH, resizeStartWidth + dx);
+    }
+    if (resizeEdge.includes('w')) {
+      const newWidth = Math.max(MIN_WIDTH, resizeStartWidth - dx);
+      posX.value = resizeStartLeft + (resizeStartWidth - newWidth);
+      dialogWidth.value = newWidth;
+    }
+    if (resizeEdge.includes('s')) {
+      dialogHeight.value = Math.max(MIN_HEIGHT, resizeStartHeight + dy);
+    }
+    if (resizeEdge.includes('n')) {
+      const newHeight = Math.max(MIN_HEIGHT, resizeStartHeight - dy);
+      posY.value = resizeStartTop + (resizeStartHeight - newHeight);
+      dialogHeight.value = newHeight;
+    }
+    return;
+  }
+
   if (!isDragging.value) return;
   const dx = event.clientX - dragStartMouseX;
   const dy = event.clientY - dragStartMouseY;
@@ -147,6 +284,7 @@ const onMouseMove = (event: MouseEvent) => {
 };
 
 const onMouseUp = () => {
+  isResizing.value = false;
   isDragging.value = false;
 };
 
@@ -157,10 +295,28 @@ const onWindowResize = () => {
   posY.value = clamped.y;
 };
 
+const toggleMinimize = () => {
+  if (isMaximized.value) {
+    isMaximized.value = false;
+  }
+  isMinimized.value = !isMinimized.value;
+};
+
+const toggleMaximize = () => {
+  if (isMinimized.value) {
+    isMinimized.value = false;
+  }
+  isMaximized.value = !isMaximized.value;
+};
+
 const handlePluginDialog = async (data: PluginDialogData) => {
   dialogData.value = data;
   show.value = true;
+  isMinimized.value = false;
+  isMaximized.value = false;
   reCenter();
+  dialogWidth.value = 0;
+  dialogHeight.value = 0;
 
   // Send initial server state to plugin
   try {
@@ -210,12 +366,8 @@ const closeDialog = (response: any = null) => {
     });
   }
   show.value = false;
-};
-
-const handleBackdropClick = () => {
-  if (isClosable.value) {
-    closeDialog();
-  }
+  isMinimized.value = false;
+  isMaximized.value = false;
 };
 
 const handlePostMessage = (event: MessageEvent) => {
@@ -314,29 +466,79 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.plugin-dialog-backdrop {
+.plugin-dialog-root {
   position: fixed;
   top: 0;
+  right: 0;
+  bottom: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  pointer-events: none;
   z-index: 9999;
 }
 
 .plugin-dialog-container {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   background: var(--color-surface);
-  border-radius: 16px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.1);
-  width: auto;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.08);
   min-width: 320px;
-  max-height: 85vh;
+  min-height: 200px;
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  pointer-events: auto;
+}
+
+.plugin-dialog-container.is-minimized {
+  min-height: unset;
+  height: auto !important;
+  overflow: visible;
+}
+
+.plugin-dialog-container.is-maximized {
+  border-radius: 0;
+  max-height: 100vh;
+}
+
+.plugin-dialog-container.is-dragging,
+.plugin-dialog-container.is-resizing {
+  user-select: none;
+}
+
+/* Corner resize handles */
+.resize-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  z-index: 10;
+}
+
+.resize-nw {
+  top: -4px;
+  left: -4px;
+  cursor: nw-resize;
+}
+
+.resize-ne {
+  top: -4px;
+  right: -4px;
+  cursor: ne-resize;
+}
+
+.resize-sw {
+  bottom: -4px;
+  left: -4px;
+  cursor: sw-resize;
+}
+
+.resize-se {
+  bottom: -4px;
+  right: -4px;
+  cursor: se-resize;
 }
 
 .plugin-dialog {
@@ -348,46 +550,82 @@ onBeforeUnmount(() => {
 
 .plugin-dialog-header {
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
   align-items: center;
-  padding: var(--gap-md);
+  padding: 0 0 0 12px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
   cursor: grab;
   user-select: none;
+  height: 38px;
+  background: var(--color-surface-muted);
+  border-radius: 8px 8px 0 0;
+}
+
+.plugin-dialog-container.is-maximized .plugin-dialog-header {
+  border-radius: 0;
+}
+
+.plugin-dialog-container.is-minimized .plugin-dialog-header {
+  border-radius: 8px;
+  border-bottom: none;
 }
 
 .plugin-dialog-container.is-dragging .plugin-dialog-header {
   cursor: grabbing;
 }
 
-.plugin-dialog-container.is-dragging {
-  user-select: none;
-}
-
-.plugin-dialog-header h3 {
-  margin: 0;
-  font-size: 1.25rem;
+.plugin-dialog-title {
+  font-size: 0.9rem;
   font-weight: 600;
   color: var(--color-text-primary);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
 }
 
-.close-button {
+.window-controls {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+}
+
+.window-btn {
+  width: 46px;
+  height: 38px;
   background: transparent;
   border: none;
-  padding: 4px;
   cursor: pointer;
   color: var(--color-text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-small);
-  transition: all 0.2s ease;
+  transition: background 0.15s ease, color 0.15s ease;
+  border-radius: 0;
 }
 
-.close-button:hover {
-  background: var(--color-surface-muted);
+.window-btn:hover {
+  background: var(--color-border);
   color: var(--color-text-primary);
+}
+
+.window-btn--close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
+
+.window-btn:last-child {
+  border-radius: 0 8px 0 0;
+}
+
+.plugin-dialog-container.is-maximized .window-btn:last-child {
+  border-radius: 0;
+}
+
+.plugin-dialog-container.is-minimized .window-btn:last-child {
+  border-radius: 0 8px 8px 0;
 }
 
 .plugin-dialog-content {

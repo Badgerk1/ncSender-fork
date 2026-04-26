@@ -1,0 +1,75 @@
+name: Badger Testing Build
+
+on:
+  push:
+    branches:
+      - badger-testing
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    name: Windows x64 Test Build
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          BASE=$(node -p "require('./src/NcSender.Desktop/package.json').version" 2>/dev/null || echo "0.0.1")
+          VERSION="${BASE}-badger.test.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build client
+        run: |
+          cd src/NcSender.Client
+          npm ci
+          npm run build
+
+      - name: Publish server
+        shell: powershell
+        run: |
+          $VERSION = "${{ steps.version.outputs.version }}"
+          dotnet publish src/NcSender.Server -c Release -r win-x64 --self-contained /p:PublishAot=true "/p:Version=$VERSION" -o publish-server/
+
+      - name: Stage resources for Electron
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path "src/NcSender.Desktop/resources/server", "src/NcSender.Desktop/resources/client/dist" -Force
+          Copy-Item -Recurse publish-server/* src/NcSender.Desktop/resources/server/
+          Remove-Item src/NcSender.Desktop/resources/server/*.pdb -ErrorAction SilentlyContinue
+          Copy-Item -Recurse src/NcSender.Client/dist/* src/NcSender.Desktop/resources/client/dist/
+
+      - name: Install Electron dependencies
+        run: |
+          cd src/NcSender.Desktop
+          npm ci
+
+      - name: Package Electron app
+        shell: powershell
+        run: |
+          $VERSION = "${{ steps.version.outputs.version }}"
+          cd src/NcSender.Desktop
+          npx electron-builder --win nsis --x64 --publish never "-c.extraMetadata.version=$VERSION"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncSender-windows-x64-test-${{ github.run_number }}
+          path: src/NcSender.Desktop/dist-electron/*.exe
+          retention-days: 14
