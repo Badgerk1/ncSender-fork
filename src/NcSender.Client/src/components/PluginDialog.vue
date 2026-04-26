@@ -17,11 +17,21 @@
 
 <template>
   <div v-if="show" class="plugin-dialog-backdrop" @click.self="handleBackdropClick">
-    <div class="plugin-dialog-container">
+    <div
+      ref="dialogContainer"
+      class="plugin-dialog-container"
+      :class="{ 'is-dragging': isDragging }"
+      :style="containerStyle"
+    >
       <div class="plugin-dialog">
-        <div class="plugin-dialog-header">
+        <div
+          class="plugin-dialog-header"
+          @mousedown="startDrag"
+          @dblclick="reCenter"
+          title="Drag to move · Double-click to re-center"
+        >
           <h3>{{ dialogData.title }}</h3>
-          <button v-if="isClosable" class="close-button" type="button" @click="closeDialog" aria-label="Close dialog">
+          <button v-if="isClosable" class="close-button" type="button" @mousedown.stop @click="closeDialog" aria-label="Close dialog">
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16">
               <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708"/>
             </svg>
@@ -49,6 +59,8 @@ interface PluginDialogData {
   options: Record<string, any>;
 }
 
+const DRAG_MARGIN = 40;
+
 const show = ref(false);
 const dialogData = ref<PluginDialogData>({
   pluginId: '',
@@ -57,6 +69,16 @@ const dialogData = ref<PluginDialogData>({
   options: {}
 });
 const dialogContent = ref<HTMLDivElement | null>(null);
+const dialogContainer = ref<HTMLDivElement | null>(null);
+
+// Drag / position state
+const posX = ref(-1); // -1 = not yet positioned, rely on CSS flex centering
+const posY = ref(-1);
+const isDragging = ref(false);
+let dragStartMouseX = 0;
+let dragStartMouseY = 0;
+let dragStartPosX = 0;
+let dragStartPosY = 0;
 
 let unsubscribe: (() => void) | null = null;
 
@@ -64,9 +86,81 @@ const isClosable = computed(() => {
   return dialogData.value.options.closable !== false;
 });
 
+const isPositioned = computed(() => posX.value !== -1);
+
+const containerStyle = computed(() => {
+  if (!isPositioned.value) return {};
+  return {
+    position: 'absolute' as const,
+    left: posX.value + 'px',
+    top: posY.value + 'px',
+    transform: 'none',
+    margin: '0'
+  };
+});
+
+const getClampedPos = (x: number, y: number) => {
+  const el = dialogContainer.value;
+  if (!el) return { x, y };
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  return {
+    x: Math.min(Math.max(x, DRAG_MARGIN - w), vw - DRAG_MARGIN),
+    y: Math.min(Math.max(y, DRAG_MARGIN - h), vh - DRAG_MARGIN)
+  };
+};
+
+const reCenter = () => {
+  posX.value = -1;
+  posY.value = -1;
+};
+
+const startDrag = (event: MouseEvent) => {
+  const el = dialogContainer.value;
+  if (!el) return;
+
+  // Capture current rendered position before switching to absolute positioning
+  if (!isPositioned.value) {
+    const rect = el.getBoundingClientRect();
+    posX.value = rect.left;
+    posY.value = rect.top;
+  }
+
+  isDragging.value = true;
+  dragStartMouseX = event.clientX;
+  dragStartMouseY = event.clientY;
+  dragStartPosX = posX.value;
+  dragStartPosY = posY.value;
+
+  event.preventDefault();
+};
+
+const onMouseMove = (event: MouseEvent) => {
+  if (!isDragging.value) return;
+  const dx = event.clientX - dragStartMouseX;
+  const dy = event.clientY - dragStartMouseY;
+  const clamped = getClampedPos(dragStartPosX + dx, dragStartPosY + dy);
+  posX.value = clamped.x;
+  posY.value = clamped.y;
+};
+
+const onMouseUp = () => {
+  isDragging.value = false;
+};
+
+const onWindowResize = () => {
+  if (!isPositioned.value) return;
+  const clamped = getClampedPos(posX.value, posY.value);
+  posX.value = clamped.x;
+  posY.value = clamped.y;
+};
+
 const handlePluginDialog = async (data: PluginDialogData) => {
   dialogData.value = data;
   show.value = true;
+  reCenter();
 
   // Send initial server state to plugin
   try {
@@ -193,6 +287,9 @@ onMounted(() => {
   // Listen for postMessage events from dialog iframe
   window.addEventListener('message', handlePostMessage);
   window.addEventListener('keydown', handleKeydown);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
+  window.addEventListener('resize', onWindowResize);
 });
 
 onBeforeUnmount(() => {
@@ -210,6 +307,9 @@ onBeforeUnmount(() => {
   }
   window.removeEventListener('message', handlePostMessage);
   window.removeEventListener('keydown', handleKeydown);
+  window.removeEventListener('mousemove', onMouseMove);
+  window.removeEventListener('mouseup', onMouseUp);
+  window.removeEventListener('resize', onWindowResize);
 });
 </script>
 
@@ -253,6 +353,16 @@ onBeforeUnmount(() => {
   padding: var(--gap-md);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
+  cursor: grab;
+  user-select: none;
+}
+
+.plugin-dialog-container.is-dragging .plugin-dialog-header {
+  cursor: grabbing;
+}
+
+.plugin-dialog-container.is-dragging {
+  user-select: none;
 }
 
 .plugin-dialog-header h3 {
