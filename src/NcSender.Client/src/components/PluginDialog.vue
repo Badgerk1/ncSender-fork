@@ -306,7 +306,6 @@ const toggleMinimize = () => {
   isMinimized.value = true;
   pluginMiniBar.activate(dialogData.value.title, () => {
     isMinimized.value = false;
-    show.value = true;
   });
 };
 
