@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu } = require('electron');
 const { spawn, execFile } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -19,6 +19,7 @@ const HEALTH_URL = `${SERVER_URL}/api/health`;
 let mainWindow = null;
 let serverProcess = null;
 let isKiosk = process.argv.includes('--kiosk');
+let tray = null;
 
 // ── Server lifecycle ────────────────────────────────────────────────────────
 
@@ -120,6 +121,48 @@ function killServer() {
   serverProcess = null;
 }
 
+// ── Tray ────────────────────────────────────────────────────────────────────
+
+function getTrayIcon() {
+  if (process.platform === 'win32') {
+    return path.join(__dirname, 'Assets', 'icon.ico');
+  }
+  return path.join(__dirname, 'Assets', 'icons', '256x256.png');
+}
+
+function showMainWindow() {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray() {
+  if (tray) return;
+
+  const iconPath = getTrayIcon();
+  tray = new Tray(iconPath);
+  tray.setToolTip('ncSender');
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Open',
+      click: () => showMainWindow(),
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => app.quit(),
+    },
+  ]);
+
+  tray.setContextMenu(contextMenu);
+
+  // Single-click on Windows restores the window
+  tray.on('click', () => showMainWindow());
+  tray.on('double-click', () => showMainWindow());
+}
+
 // ── Window ──────────────────────────────────────────────────────────────────
 
 function createWindow() {
@@ -157,6 +200,12 @@ function createWindow() {
       mainWindow.setBounds({ x, y, width, height });
     }
   }
+
+  mainWindow.on('minimize', (event) => {
+    event.preventDefault();
+    mainWindow.hide();
+    createTray();
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -233,6 +282,13 @@ app.whenReady().then(async () => {
   mainWindow.loadURL(loaderHtml);
 
   startServer();
+});
+
+app.on('before-quit', () => {
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
 });
 
 app.on('window-all-closed', () => {
