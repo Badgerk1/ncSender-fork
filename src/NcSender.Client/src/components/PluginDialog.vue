@@ -16,7 +16,7 @@
 -->
 
 <template>
-  <div v-if="show" class="plugin-dialog-root">
+  <div v-show="show" class="plugin-dialog-root">
     <div
       ref="dialogContainer"
       class="plugin-dialog-container"
@@ -303,9 +303,8 @@ const toggleMinimize = () => {
     isMaximized.value = false;
   }
   if (!show.value) return;
-  show.value = false;
+  isMinimized.value = true;
   pluginMiniBar.activate(dialogData.value.title, () => {
-    show.value = true;
     isMinimized.value = false;
   });
 };
