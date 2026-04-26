@@ -126,37 +126,20 @@ function killServer() {
 
 const MINI_BAR_WIDTH = 260;
 const MINI_BAR_HEIGHT = 48;
-const MINI_BAR_MARGIN = 16;
-const MINI_BAR_BOUNDS_FILE = path.join(app.getPath('userData'), 'mini-bar-bounds.json');
+const MINI_BAR_MARGIN = 14;
 
-function loadMiniBarBounds() {
-  try {
-    const data = fs.readFileSync(MINI_BAR_BOUNDS_FILE, 'utf8');
-    return JSON.parse(data);
-  } catch {
-    return null;
-  }
-}
-
-function saveMiniBarBounds(bounds) {
-  try {
-    fs.writeFileSync(MINI_BAR_BOUNDS_FILE, JSON.stringify(bounds));
-  } catch { /* ignore */ }
-}
-
-function getMiniBarDefaultPosition() {
-  const { x, y, width, height } = screen.getPrimaryDisplay().workArea;
+function getDockPosition() {
+  const bounds = mainWindow ? mainWindow.getBounds() : screen.getPrimaryDisplay().workArea;
   return {
-    x: x + width - MINI_BAR_WIDTH - MINI_BAR_MARGIN,
-    y: y + height - MINI_BAR_HEIGHT - MINI_BAR_MARGIN,
+    x: bounds.x + bounds.width - MINI_BAR_WIDTH - MINI_BAR_MARGIN,
+    y: bounds.y + MINI_BAR_MARGIN,
   };
 }
 
 function createMiniWindow() {
   if (miniWindow) return;
 
-  const saved = loadMiniBarBounds();
-  const pos = saved || getMiniBarDefaultPosition();
+  const pos = getDockPosition();
 
   miniWindow = new BrowserWindow({
     width: MINI_BAR_WIDTH,
@@ -165,6 +148,7 @@ function createMiniWindow() {
     y: pos.y,
     frame: false,
     resizable: false,
+    movable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     show: false,
@@ -178,17 +162,21 @@ function createMiniWindow() {
 
   miniWindow.loadFile(path.join(__dirname, 'mini-bar.html'));
 
-  miniWindow.on('moved', () => {
-    saveMiniBarBounds(miniWindow.getBounds());
-  });
-
   miniWindow.on('closed', () => {
     miniWindow = null;
   });
 }
 
+function repositionMiniWindow() {
+  if (!miniWindow || !miniWindow.isVisible()) return;
+  const pos = getDockPosition();
+  miniWindow.setPosition(pos.x, pos.y);
+}
+
 function showMiniWindow() {
   if (!miniWindow) createMiniWindow();
+  const pos = getDockPosition();
+  miniWindow.setPosition(pos.x, pos.y);
   miniWindow.showInactive();
 }
 
@@ -246,6 +234,9 @@ function createWindow() {
     mainWindow.hide();
     showMiniWindow();
   });
+
+  mainWindow.on('move', repositionMiniWindow);
+  mainWindow.on('resize', repositionMiniWindow);
 
   mainWindow.on('closed', () => {
     mainWindow = null;
