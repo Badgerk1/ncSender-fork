@@ -73,3 +73,193 @@ jobs:
           name: ncSender-windows-x64-test-${{ github.run_number }}
           path: src/NcSender.Desktop/dist-electron/*.exe
           retention-days: 14
+
+  macos-arm64:
+    name: macOS arm64 Test Build
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          BASE=$(node -p "require('./src/NcSender.Desktop/package.json').version" 2>/dev/null || echo "0.0.1")
+          VERSION="${BASE}-badger.test.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build client
+        run: |
+          cd src/NcSender.Client
+          npm ci
+          npm run build
+
+      - name: Publish server
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SYSROOT="$(xcrun --show-sdk-path)"
+          dotnet publish src/NcSender.Server -c Release -r osx-arm64 --self-contained \
+            /p:PublishAot=true "/p:SysRoot=${SYSROOT}" /p:Version="$VERSION" -o publish-server/
+
+      - name: Stage resources for Electron
+        run: |
+          mkdir -p src/NcSender.Desktop/resources/server
+          mkdir -p src/NcSender.Desktop/resources/client/dist
+          cp -r publish-server/* src/NcSender.Desktop/resources/server/
+          rm -f src/NcSender.Desktop/resources/server/*.pdb
+          cp -r src/NcSender.Client/dist/* src/NcSender.Desktop/resources/client/dist/
+
+      - name: Install Electron dependencies
+        run: |
+          cd src/NcSender.Desktop
+          npm ci
+
+      - name: Package Electron app
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cd src/NcSender.Desktop
+          npx electron-builder --mac dmg --arm64 --publish never \
+            -c.extraMetadata.version="$VERSION"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncSender-macos-arm64-test-${{ github.run_number }}
+          path: src/NcSender.Desktop/dist-electron/*.dmg
+          retention-days: 14
+
+  linux-x64:
+    name: Linux x64 Test Build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          BASE=$(node -p "require('./src/NcSender.Desktop/package.json').version" 2>/dev/null || echo "0.0.1")
+          VERSION="${BASE}-badger.test.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build client
+        run: |
+          cd src/NcSender.Client
+          npm ci
+          npm run build
+
+      - name: Publish server
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          dotnet publish src/NcSender.Server -c Release -r linux-x64 --self-contained \
+            /p:PublishAot=true /p:Version="$VERSION" -o publish-server/
+
+      - name: Stage resources for Electron
+        run: |
+          mkdir -p src/NcSender.Desktop/resources/server
+          mkdir -p src/NcSender.Desktop/resources/client/dist
+          cp -r publish-server/* src/NcSender.Desktop/resources/server/
+          rm -f src/NcSender.Desktop/resources/server/*.pdb
+          cp -r src/NcSender.Client/dist/* src/NcSender.Desktop/resources/client/dist/
+
+      - name: Install Electron dependencies
+        run: |
+          cd src/NcSender.Desktop
+          npm ci
+
+      - name: Package Electron app
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cd src/NcSender.Desktop
+          npx electron-builder --linux deb --x64 --publish never \
+            -c.extraMetadata.version="$VERSION"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncSender-linux-x64-test-${{ github.run_number }}
+          path: src/NcSender.Desktop/dist-electron/*.deb
+          retention-days: 14
+
+  linux-arm64:
+    name: Linux arm64 Test Build (Raspberry Pi)
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          BASE=$(node -p "require('./src/NcSender.Desktop/package.json').version" 2>/dev/null || echo "0.0.1")
+          VERSION="${BASE}-badger.test.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build client
+        run: |
+          cd src/NcSender.Client
+          npm ci
+          npm run build
+
+      - name: Publish server
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          dotnet publish src/NcSender.Server -c Release -r linux-arm64 --self-contained \
+            /p:PublishAot=true /p:Version="$VERSION" -o publish-server/
+
+      - name: Stage resources for Electron
+        run: |
+          mkdir -p src/NcSender.Desktop/resources/server
+          mkdir -p src/NcSender.Desktop/resources/client/dist
+          cp -r publish-server/* src/NcSender.Desktop/resources/server/
+          rm -f src/NcSender.Desktop/resources/server/*.pdb
+          cp -r src/NcSender.Client/dist/* src/NcSender.Desktop/resources/client/dist/
+
+      - name: Install Electron dependencies
+        run: |
+          cd src/NcSender.Desktop
+          npm ci
+
+      - name: Package Electron app
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cd src/NcSender.Desktop
+          npx electron-builder --linux deb --arm64 --publish never \
+            -c.extraMetadata.version="$VERSION"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncSender-linux-arm64-test-${{ github.run_number }}
+          path: src/NcSender.Desktop/dist-electron/*.deb
+          retention-days: 14
