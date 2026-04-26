@@ -207,13 +207,6 @@ function createWindow() {
     createTray();
   });
 
-  mainWindow.on('close', (event) => {
-    if (!app.isQuitting) {
-      event.preventDefault();
-      app.quit();
-    }
-  });
-
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -292,7 +285,6 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
-  app.isQuitting = true;
   if (tray) {
     tray.destroy();
     tray = null;
