@@ -1,7 +1,8 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, screen } = require('electron');
 const { spawn, execFile } = require('child_process');
 const path = require('path');
 const http = require('http');
+const fs = require('fs');
 
 // Disable Chromium sandbox on Linux so child processes (server) can use sudo
 // for updates. Without this, app.relaunch() loses --no-sandbox from the
@@ -17,9 +18,9 @@ const SERVER_URL = `http://localhost:${SERVER_PORT}`;
 const HEALTH_URL = `${SERVER_URL}/api/health`;
 
 let mainWindow = null;
+let miniWindow = null;
 let serverProcess = null;
 let isKiosk = process.argv.includes('--kiosk');
-let tray = null;
 
 // ── Server lifecycle ────────────────────────────────────────────────────────
 
@@ -121,13 +122,78 @@ function killServer() {
   serverProcess = null;
 }
 
-// ── Tray ────────────────────────────────────────────────────────────────────
+// ── Mini-bar window ─────────────────────────────────────────────────────────
 
-function getTrayIcon() {
-  if (process.platform === 'win32') {
-    return path.join(__dirname, 'Assets', 'icon.ico');
+const MINI_BAR_WIDTH = 260;
+const MINI_BAR_HEIGHT = 48;
+const MINI_BAR_MARGIN = 16;
+const MINI_BAR_BOUNDS_FILE = path.join(app.getPath('userData'), 'mini-bar-bounds.json');
+
+function loadMiniBarBounds() {
+  try {
+    const data = fs.readFileSync(MINI_BAR_BOUNDS_FILE, 'utf8');
+    return JSON.parse(data);
+  } catch {
+    return null;
   }
-  return path.join(__dirname, 'Assets', 'icons', '256x256.png');
+}
+
+function saveMiniBarBounds(bounds) {
+  try {
+    fs.writeFileSync(MINI_BAR_BOUNDS_FILE, JSON.stringify(bounds));
+  } catch { /* ignore */ }
+}
+
+function getMiniBarDefaultPosition() {
+  const { x, y, width, height } = screen.getPrimaryDisplay().workArea;
+  return {
+    x: x + width - MINI_BAR_WIDTH - MINI_BAR_MARGIN,
+    y: y + height - MINI_BAR_HEIGHT - MINI_BAR_MARGIN,
+  };
+}
+
+function createMiniWindow() {
+  if (miniWindow) return;
+
+  const saved = loadMiniBarBounds();
+  const pos = saved || getMiniBarDefaultPosition();
+
+  miniWindow = new BrowserWindow({
+    width: MINI_BAR_WIDTH,
+    height: MINI_BAR_HEIGHT,
+    x: pos.x,
+    y: pos.y,
+    frame: false,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    backgroundColor: '#1a1a2e',
+    webPreferences: {
+      preload: path.join(__dirname, 'mini-bar-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  miniWindow.loadFile(path.join(__dirname, 'mini-bar.html'));
+
+  miniWindow.on('moved', () => {
+    saveMiniBarBounds(miniWindow.getBounds());
+  });
+
+  miniWindow.on('closed', () => {
+    miniWindow = null;
+  });
+}
+
+function showMiniWindow() {
+  if (!miniWindow) createMiniWindow();
+  miniWindow.showInactive();
+}
+
+function hideMiniWindow() {
+  if (miniWindow) miniWindow.hide();
 }
 
 function showMainWindow() {
@@ -135,32 +201,6 @@ function showMainWindow() {
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
-}
-
-function createTray() {
-  if (tray) return;
-
-  const iconPath = getTrayIcon();
-  tray = new Tray(iconPath);
-  tray.setToolTip('ncSender');
-
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: 'Open',
-      click: () => showMainWindow(),
-    },
-    { type: 'separator' },
-    {
-      label: 'Quit',
-      click: () => app.quit(),
-    },
-  ]);
-
-  tray.setContextMenu(contextMenu);
-
-  // Single-click on Windows restores the window
-  tray.on('click', () => showMainWindow());
-  tray.on('double-click', () => showMainWindow());
 }
 
 // ── Window ──────────────────────────────────────────────────────────────────
@@ -204,7 +244,7 @@ function createWindow() {
   mainWindow.on('minimize', (event) => {
     event.preventDefault();
     mainWindow.hide();
-    createTray();
+    showMiniWindow();
   });
 
   mainWindow.on('closed', () => {
@@ -220,6 +260,11 @@ ipcMain.handle('app:quit', () => {
 
 ipcMain.handle('app:isKiosk', () => {
   return isKiosk;
+});
+
+ipcMain.handle('minibar:restore', () => {
+  hideMiniWindow();
+  showMainWindow();
 });
 
 // ── Keyboard shortcuts ──────────────────────────────────────────────────────
@@ -254,7 +299,6 @@ app.whenReady().then(async () => {
   // Show a loading page that polls the server and redirects when ready.
   // This shows the window immediately instead of a blank screen for 15+ seconds.
   // Read the SVG logo and encode it for embedding in the loader page
-  const fs = require('fs');
   let logoSrc = '';
   try {
     const svgPath = path.join(__dirname, 'Assets', 'ncsender-light.svg');
@@ -285,9 +329,9 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
-  if (tray) {
-    tray.destroy();
-    tray = null;
+  if (miniWindow) {
+    miniWindow.destroy();
+    miniWindow = null;
   }
 });
 
