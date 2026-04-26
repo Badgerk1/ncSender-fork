@@ -154,9 +154,9 @@
         <label class="unit-label">Unit:</label>
         <span class="unit-value">{{ unitDisplayText }}</span>
       </div>
-      <div v-if="pluginMiniBar.show.value" class="plugin-minibar">
-        <span class="plugin-minibar__title">{{ pluginMiniBar.title.value }}</span>
-        <button class="plugin-minibar__restore" @click="pluginMiniBar.restore()">Restore</button>
+      <div v-if="pluginMinimized" class="plugin-minibar">
+        <span class="plugin-minibar__title">{{ pluginTitle }}</span>
+        <button class="plugin-minibar__restore" @click="restorePlugin()">Restore</button>
       </div>
       <button class="theme-toggle" @click="$emit('toggle-theme')" title="Toggle theme">
         <svg class="theme-icon" width="32" height="32"><use href="#emoji-sun"></use></svg>
@@ -193,7 +193,7 @@ type TopToolbarUpdateState = {
 
 const store = useAppStore();
 const { isJobRunning, isConnected, senderStatus: storeSenderStatus, unitsPreference, serverVersion } = store;
-const pluginMiniBar = usePluginMiniBar();
+const { show: pluginMinimized, title: pluginTitle, restore: restorePlugin } = usePluginMiniBar();
 
 const appVersion = computed(() => serverVersion.value || packageJson.version);
 
