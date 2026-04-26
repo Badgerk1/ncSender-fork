@@ -100,6 +100,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { api } from '@/lib/api';
+import { usePluginMiniBar } from '@/composables/use-plugin-mini-bar';
 
 interface PluginDialogData {
   pluginId: string;
@@ -112,6 +113,8 @@ interface PluginDialogData {
 const MIN_WIDTH = 320;
 const MIN_HEIGHT = 200;
 const DRAG_MARGIN = 40;
+
+const pluginMiniBar = usePluginMiniBar();
 
 const show = ref(false);
 const dialogData = ref<PluginDialogData>({
@@ -299,7 +302,12 @@ const toggleMinimize = () => {
   if (isMaximized.value) {
     isMaximized.value = false;
   }
-  isMinimized.value = !isMinimized.value;
+  if (!show.value) return;
+  show.value = false;
+  pluginMiniBar.activate(dialogData.value.title, () => {
+    show.value = true;
+    isMinimized.value = false;
+  });
 };
 
 const toggleMaximize = () => {
@@ -310,6 +318,7 @@ const toggleMaximize = () => {
 };
 
 const handlePluginDialog = async (data: PluginDialogData) => {
+  pluginMiniBar.deactivate();
   dialogData.value = data;
   show.value = true;
   isMinimized.value = false;
@@ -368,6 +377,7 @@ const closeDialog = (response: any = null) => {
   show.value = false;
   isMinimized.value = false;
   isMaximized.value = false;
+  pluginMiniBar.deactivate();
 };
 
 const handlePostMessage = (event: MessageEvent) => {
@@ -418,8 +428,9 @@ const forwardCNCData = (data: any) => {
 
 const handleCloseDialog = (data: { dialogId: string }) => {
   // Close dialog if it matches the current dialog (multi-client sync)
-  if (show.value && dialogData.value.dialogId === data.dialogId) {
+  if (dialogData.value.dialogId === data.dialogId) {
     show.value = false;
+    pluginMiniBar.deactivate();
   }
 };
 
@@ -445,6 +456,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  pluginMiniBar.deactivate();
   if (unsubscribe) {
     unsubscribe();
   }

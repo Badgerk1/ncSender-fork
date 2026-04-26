@@ -1,5 +1,5 @@
 const { app, BrowserWindow, globalShortcut, ipcMain, screen } = require('electron');
-const { spawn, execFile } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -18,7 +18,6 @@ const SERVER_URL = `http://localhost:${SERVER_PORT}`;
 const HEALTH_URL = `${SERVER_URL}/api/health`;
 
 let mainWindow = null;
-let miniWindow = null;
 let serverProcess = null;
 let isKiosk = process.argv.includes('--kiosk');
 
@@ -122,75 +121,6 @@ function killServer() {
   serverProcess = null;
 }
 
-// ── Mini-bar window ─────────────────────────────────────────────────────────
-
-const MINI_BAR_WIDTH = 260;
-const MINI_BAR_HEIGHT = 48;
-const MINI_BAR_MARGIN = 14;
-
-function getDockPosition() {
-  const bounds = mainWindow ? mainWindow.getBounds() : screen.getPrimaryDisplay().workArea;
-  return {
-    x: bounds.x + bounds.width - MINI_BAR_WIDTH - MINI_BAR_MARGIN,
-    y: bounds.y + MINI_BAR_MARGIN,
-  };
-}
-
-function createMiniWindow() {
-  if (miniWindow) return;
-
-  const pos = getDockPosition();
-
-  miniWindow = new BrowserWindow({
-    width: MINI_BAR_WIDTH,
-    height: MINI_BAR_HEIGHT,
-    x: pos.x,
-    y: pos.y,
-    frame: false,
-    resizable: false,
-    movable: false,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    show: false,
-    backgroundColor: '#1a1a2e',
-    webPreferences: {
-      preload: path.join(__dirname, 'mini-bar-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-
-  miniWindow.loadFile(path.join(__dirname, 'mini-bar.html'));
-
-  miniWindow.on('closed', () => {
-    miniWindow = null;
-  });
-}
-
-function repositionMiniWindow() {
-  if (!miniWindow || !miniWindow.isVisible()) return;
-  const pos = getDockPosition();
-  miniWindow.setPosition(pos.x, pos.y);
-}
-
-function showMiniWindow() {
-  if (!miniWindow) createMiniWindow();
-  const pos = getDockPosition();
-  miniWindow.setPosition(pos.x, pos.y);
-  miniWindow.showInactive();
-}
-
-function hideMiniWindow() {
-  if (miniWindow) miniWindow.hide();
-}
-
-function showMainWindow() {
-  if (!mainWindow) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
-}
-
 // ── Window ──────────────────────────────────────────────────────────────────
 
 function createWindow() {
@@ -229,15 +159,6 @@ function createWindow() {
     }
   }
 
-  mainWindow.on('minimize', (event) => {
-    event.preventDefault();
-    mainWindow.hide();
-    showMiniWindow();
-  });
-
-  mainWindow.on('move', repositionMiniWindow);
-  mainWindow.on('resize', repositionMiniWindow);
-
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -251,11 +172,6 @@ ipcMain.handle('app:quit', () => {
 
 ipcMain.handle('app:isKiosk', () => {
   return isKiosk;
-});
-
-ipcMain.handle('minibar:restore', () => {
-  hideMiniWindow();
-  showMainWindow();
 });
 
 // ── Keyboard shortcuts ──────────────────────────────────────────────────────
@@ -317,13 +233,6 @@ app.whenReady().then(async () => {
   mainWindow.loadURL(loaderHtml);
 
   startServer();
-});
-
-app.on('before-quit', () => {
-  if (miniWindow) {
-    miniWindow.destroy();
-    miniWindow = null;
-  }
 });
 
 app.on('window-all-closed', () => {
