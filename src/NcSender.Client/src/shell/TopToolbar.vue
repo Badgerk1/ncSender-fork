@@ -154,6 +154,10 @@
         <label class="unit-label">Unit:</label>
         <span class="unit-value">{{ unitDisplayText }}</span>
       </div>
+      <div v-if="pluginMiniBar.show.value" class="plugin-minibar">
+        <span class="plugin-minibar__title">{{ pluginMiniBar.title.value }}</span>
+        <button class="plugin-minibar__restore" @click="pluginMiniBar.restore()">Restore</button>
+      </div>
       <button class="theme-toggle" @click="$emit('toggle-theme')" title="Toggle theme">
         <svg class="theme-icon" width="32" height="32"><use href="#emoji-sun"></use></svg>
       </button>
@@ -174,6 +178,7 @@ import { useAppStore } from '../composables/use-app-store';
 import { getFeedRateUnitLabel } from '../lib/units';
 import GamepadDebugOverlay from '../features/controls/GamepadDebugOverlay.vue';
 import packageJson from '../../../package.json';
+import { usePluginMiniBar } from '../composables/use-plugin-mini-bar';
 
 type TopToolbarUpdateState = {
   supported?: boolean;
@@ -188,6 +193,7 @@ type TopToolbarUpdateState = {
 
 const store = useAppStore();
 const { isJobRunning, isConnected, senderStatus: storeSenderStatus, unitsPreference, serverVersion } = store;
+const pluginMiniBar = usePluginMiniBar();
 
 const appVersion = computed(() => serverVersion.value || packageJson.version);
 
@@ -687,6 +693,50 @@ const onVersionClick = () => {
   color: var(--color-text-primary);
   font-size: 0.95rem;
   font-weight: 500;
+}
+
+.plugin-minibar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  padding: 4px 8px;
+  height: 40px;
+  max-width: 280px;
+}
+
+.plugin-minibar__title {
+  color: var(--color-text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.plugin-minibar__restore {
+  background: #4a9eff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.plugin-minibar__restore:hover {
+  background: #3a8eef;
+}
+
+.plugin-minibar__restore:active {
+  background: #2a7edf;
 }
 
 .toolbar__actions {
