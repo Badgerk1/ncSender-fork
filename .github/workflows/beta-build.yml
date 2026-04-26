@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*-beta*'
+    branches:
+      - 'badger-testing'
   workflow_dispatch:
     inputs:
       version:
@@ -21,6 +23,7 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
+      is_release: ${{ steps.version.outputs.is_release }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,14 +36,23 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             TAG="v${{ github.event.inputs.version }}"
-          else
+            IS_RELEASE="true"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG="${{ github.ref_name }}"
+            IS_RELEASE="true"
+          else
+            # Branch push — derive base version from package.json, no GitHub Release created
+            BASE_VERSION=$(node -p "require('./src/NcSender.Desktop/package.json').version")
+            TAG="v${BASE_VERSION}-badger1.build.${{ github.run_number }}"
+            IS_RELEASE="false"
           fi
           VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "is_release=$IS_RELEASE" >> "$GITHUB_OUTPUT"
 
       - name: Get release notes from tag message
+        if: steps.version.outputs.is_release == 'true'
         run: |
           TAG="${{ steps.version.outputs.tag }}"
           git fetch origin tag "$TAG" --force 2>/dev/null || true
@@ -52,6 +64,7 @@ jobs:
           fi
 
       - name: Create draft beta release
+        if: steps.version.outputs.is_release == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -309,6 +322,7 @@ jobs:
 
   publish-release:
     name: Publish Beta Release
+    if: needs.prepare-release.outputs.is_release == 'true'
     needs:
       - prepare-release
       - linux-x64
